@@ -93,6 +93,7 @@ logging.info('add = %s', str(args.input))
 output_filename = args.output
 output_basename = path.basename(output_filename)
 output_dirname = path.dirname(output_filename)
+output_dirname = path.abspath(output_dirname) if output_dirname else os.getcwd()
 output_noext, output_ext = os.path.splitext(output_filename)
 
 logging.info('output_ext = %s', output_ext)
