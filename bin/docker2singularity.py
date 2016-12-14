@@ -47,7 +47,7 @@ def prepend_env_var(name, path):
         return path
 
 def env_elem_subst(e):
-    if (e['name'] == "PATH"): e['value'] = prepend_env_var("PATH", e['value'])
+    # if (e['name'] == "PATH"): e['value'] = prepend_env_var("PATH", e['value'])
     return e
 
 def print_to_file_if_not_exists(filename, mode, s):
@@ -176,14 +176,16 @@ if not path.isdir(path.join(rootfs_dir, "dev")):
 if path.isfile(path.join(rootfs_dir, ".dockerenv")):
     os.remove(path.join(rootfs_dir, ".dockerenv"))
 
-env_vars = [env_elem_subst(e) for e in env_vars]
-
 env_vars.append({'name': 'PS1', 'value': "Singularity.$SINGULARITY_CONTAINER> $PS1"})
 env_vars.append({'name': 'SINGULARITY_INIT', 'value': "1"})
 
 env_var_names = [e['name'] for e in env_vars]
 if not 'PATH' in env_var_names:
-    env_vars.insert(0, {'name': 'PATH', 'value': "$PATH:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"})
+    env_vars.insert(0, {'name': 'PATH', 'value': "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"})
+if not 'LD_LIBRARY_PATH' in env_var_names:
+    env_vars.insert(1, {'name': 'LD_LIBRARY_PATH', 'value': ""})
+
+env_vars = [env_elem_subst(e) for e in env_vars]
 
 logging.info("Singularity container environment variables:")
 for e in env_vars:
