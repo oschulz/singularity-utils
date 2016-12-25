@@ -139,9 +139,11 @@ if (args.unprivileged):
     aci_manifest_file = os.path.join(tmp_area, "manifest")
     with codecs.open(aci_manifest_file, encoding='utf-8') as f:
         aci_manifest = json.load(f)
-    env_data = aci_manifest['app']['environment']
+    app_data = aci_manifest.get('app', {})
+    app_data = app_data if app_data else {}
+    env_data = app_data.get('environment', None)
     if isinstance(env_data, list): env_vars.extend(env_data)
-    run_cmd_data = aci_manifest['app']['exec']
+    run_cmd_data = app_data.get('exec', None)
     if isinstance(run_cmd_data, list): run_cmd.extend(run_cmd_data)
 else:
     image = args.input
@@ -150,9 +152,11 @@ else:
     try:
         inspect_str = check_output(["docker", "inspect", image])
         inspect_data = json.loads(inspect_str)[0]
-        env_data = inspect_data['Config']['Env']
+        config_data = inspect_data.get('Config', {})
+        config_data = config_data if config_data else {}
+        env_data = config_data.get('Env', None)
         if isinstance(env_data, list): env_vars.extend([docker_env_entry_trafo(s) for s in env_data])
-        run_cmd_data = inspect_data['Config']['Cmd']
+        run_cmd_data = config_data.get('Cmd', None)
         if isinstance(run_cmd_data, list): run_cmd.extend(run_cmd_data)
 
         container = check_output(["docker", "run", "-d", image, "/bin/sh"]).strip()
@@ -170,6 +174,8 @@ else:
         if container:
             call(["docker", "rm", container])
             logging.info("Removed container %s", container)
+
+subprocess.call(['chmod', '-R', 'u+w', rootfs_dir])
 
 if not path.isdir(path.join(rootfs_dir, "dev")):
     os.mkdir(path.join(rootfs_dir, "dev"))
