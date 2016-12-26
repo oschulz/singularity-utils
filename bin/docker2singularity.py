@@ -175,7 +175,7 @@ else:
             call(["docker", "rm", container])
             logging.info("Removed container %s", container)
 
-subprocess.call(['chmod', '-R', 'u+w', rootfs_dir])
+subprocess.call(['chmod', '-R', 'u+rwX,go+rX', rootfs_dir])
 
 if not path.isdir(path.join(rootfs_dir, "dev")):
     os.mkdir(path.join(rootfs_dir, "dev"))
