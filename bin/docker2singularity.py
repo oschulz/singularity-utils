@@ -22,8 +22,9 @@ import logging
 import argparse
 import os, shutil
 from os import mkdir, path
+import re
 from glob import glob
-from tempfile import mkdtemp
+from tempfile import mkdtemp, mktemp
 import subprocess
 from subprocess import Popen, PIPE, call, check_output
 import json
@@ -90,11 +91,14 @@ logging.info('unprivileged = %r', args.unprivileged)
 logging.info('add = %s', str(args.input))
 
 
-output_filename = args.output
+output_filename = re.sub("/+$", "", args.output)
+if not output_filename:
+    error_exit("Invalid output name \"%s\"", args.output)
+
 output_basename = path.basename(output_filename)
 output_dirname = path.dirname(output_filename)
 output_dirname = path.abspath(output_dirname) if output_dirname else os.getcwd()
-output_noext, output_ext = os.path.splitext(output_filename)
+output_noext, output_ext = os.path.splitext(output_basename)
 
 logging.info('output_ext = %s', output_ext)
 
@@ -107,13 +111,13 @@ else:
 
 logging.info('Output type: %s', output_type)
 
-if (path.exists(output_filename)):
-    error_exit("Output \"%s\" already exists", output_filename)
-
 if (not path.isdir(output_dirname)):
     error_exit("Can't create output in \"%s\", doesn't exist or not a directory", output_filename)
 
 if (output_type == "directory"):
+    if (path.exists(output_filename)):
+        error_exit("Output directory \"%s\" already exists", output_filename)
+
     tmp_area = mkdtemp(prefix = output_basename + "-", dir = output_dirname)
 else:
     tmp_area = mkdtemp(prefix = "docker2singularity-")
@@ -290,7 +294,10 @@ if quoted_run_cmd:
 if (output_type == "directory"):
     shutil.move(rootfs_dir, output_filename)
 elif (output_type == "SquashFS"):
-    subprocess.call(["mksquashfs", rootfs_dir, output_filename, "-all-root"])
+    output_noext, output_ext
+    tmp_output_filename = mktemp(prefix=output_noext+"_tmp-", suffix=output_ext, dir=output_dirname)
+    subprocess.call(["mksquashfs", rootfs_dir, tmp_output_filename, "-all-root"])
+    os.rename(tmp_output_filename, output_filename)
 else:
     error_exit("Internal error, unkown output type \"%s\"", SquashFS)
 
