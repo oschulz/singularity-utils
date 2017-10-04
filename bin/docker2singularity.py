@@ -27,8 +27,10 @@ from glob import glob
 from tempfile import mkdtemp, mktemp
 import subprocess
 from subprocess import Popen, PIPE, call, check_output
+import distutils.spawn
 import json
 import codecs
+from string import Template
 
 
 def shell_double_quote(s):
@@ -50,6 +52,11 @@ def prepend_env_var(name, path):
 def env_elem_subst(e):
     # if (e['name'] == "PATH"): e['value'] = prepend_env_var("PATH", e['value'])
     return e
+
+def print_to_file(filename, mode, s):
+    with open(filename, "w") as f:
+        f.write(s)
+    os.chmod(filename, mode)
 
 def print_to_file_if_not_exists(filename, mode, s):
     if (not path.isfile(filename)):
@@ -73,6 +80,27 @@ def error_exit(*args, **kwargs):
     clean_up()
     logging.error(*args, **kwargs)
     exit(1)
+
+def singularity_libexecdir():
+    singularity_exe = distutils.spawn.find_executable("singularity")
+    if not singularity_exe:
+        error_exit("Can't find singularity executable")
+    else:
+        proc = subprocess.Popen(['strings', singularity_exe], stdout=subprocess.PIPE)
+
+        keyvals = {}
+        for line in proc.stdout.readlines():
+            m = re.match(r'^(\w+)="(.*)"\s*$', line)
+            if m:
+                keyvals[m.group(1)] = m.group(2)
+
+        libexecdir = keyvals["libexecdir"]
+        while "$" in libexecdir:
+            libexecdir = Template(libexecdir).substitute(keyvals)
+    if libexecdir:
+        return libexecdir
+    else:
+        error_exit("Can't determine singularity's libexecdir")
 
 
 logging.basicConfig(level = logging.INFO, format = "%(levelname)s: %(message)s")
@@ -179,7 +207,6 @@ else:
             call(["docker", "rm", container])
             logging.info("Removed container %s", container)
 
-subprocess.call(['chmod', '-R', 'u+rwX,go+rX', rootfs_dir])
 
 if not path.isdir(path.join(rootfs_dir, "dev")):
     os.mkdir(path.join(rootfs_dir, "dev"))
@@ -187,8 +214,13 @@ if not path.isdir(path.join(rootfs_dir, "dev")):
 if path.isfile(path.join(rootfs_dir, ".dockerenv")):
     os.remove(path.join(rootfs_dir, ".dockerenv"))
 
-env_vars.append({'name': 'PS1', 'value': "Singularity.$SINGULARITY_CONTAINER> $PS1"})
-env_vars.append({'name': 'SINGULARITY_INIT', 'value': "1"})
+
+libexecdir = singularity_libexecdir()
+environment_tar_path = path.join(libexecdir, "singularity", "bootstrap-scripts", "environment.tar")
+print path.isfile(environment_tar_path)
+logging.info("Extracting %s to %s", environment_tar_path, rootfs_dir)
+subprocess.call(["tar", "-x", "-v", "-C", rootfs_dir, "-f", environment_tar_path])
+
 
 env_var_names = [e['name'] for e in env_vars]
 if not 'PATH' in env_var_names:
@@ -209,84 +241,19 @@ if run_cmd:
 else:
     logging.info("Singularity container has no default run cmd.")
 
-environment_contents = """\
-# Define any environment init code here
-
-if test -z "$SINGULARITY_INIT"; then
-"""
-environment_contents += "    "+ "\n    ".join([e['name'] + "=" + shell_double_quote(e['value']) for e in env_vars]) + "\n"
-environment_contents += "    export " + " ".join(env_var_names + ["PS1", "SINGULARITY_INIT"]) + "\n"
-environment_contents += """\
-fi
-"""
-print_to_file_if_not_exists(path.join(rootfs_dir, "environment"), 0644, environment_contents)
+environment_contents = ""
+environment_contents += "\n".join(["export " + e['name'] + "=" + shell_double_quote(e['value']) for e in env_vars]) + "\n"
+print_to_file(path.join(rootfs_dir, ".singularity.d", "env", "10-docker.sh"), 0644, environment_contents)
 
 
-shell_path = "/bin/bash" if path.isfile(path.join(rootfs_dir, "bin", "bash")) else "/bin/sh"
-logging.info("Using %s as default shell for container.", shell_path)
+subprocess.call(["sed", "s/bash --norc/bash/", "-i", path.join(rootfs_dir, ".singularity.d", "actions", "shell")])
 
-
-#dot_shell_contents = "#!" + shell_path + "\n"
-#dot_shell_contents += """\
-#. /environment
-#if test -n "$SHELL" -a -x "$SHELL"; then
-#    exec "$SHELL" "$@"
-#else
-#    echo "ERROR: Shell does not exist in container: $SHELL" 1>&2
-#    echo "ERROR: Using /bin/sh instead..." 1>&2
-#fi
-#if test -x /bin/sh; then
-#    SHELL=/bin/sh
-#    export SHELL
-#    exec /bin/sh "$@"
-#else
-#    echo "ERROR: /bin/sh does not exist in container" 1>&2
-#fi
-#exit 1
-#"""
-#
-dot_shell_contents = "#!" + shell_path + "\n" + "\n"
-dot_shell_contents += """\
-. /environment
-"""
-dot_shell_contents += "SHELL=" + shell_double_quote(shell_path) + "\n"
-dot_shell_contents += """\
-export SHELL
-if test -n "$SHELL" -a -x "$SHELL"; then
-    exec "$SHELL" "$@"
-else
-    echo "ERROR: Shell does not exist in container: $SHELL" 1>&2
-fi
-exit 1
-"""
-print_to_file_if_not_exists(path.join(rootfs_dir, ".shell"), 0755, dot_shell_contents)
-
-
-dot_exec_contents = "#!" + shell_path + "\n"
-dot_exec_contents += """\
-. /environment
-exec "$@"
-"""
-print_to_file_if_not_exists(path.join(rootfs_dir, ".exec"), 0755, dot_exec_contents)
-
-
-dot_run_contents = "#!" + shell_path + "\n"
-dot_run_contents += """\
-. /environment
-if test -x /singularity; then
-    exec /singularity "$@"
-else
-    echo "No Singularity runscript found, executing /bin/sh"
-    exec /bin/sh "$@"
-fi
-"""
-print_to_file_if_not_exists(path.join(rootfs_dir, ".run"), 0755, dot_run_contents)
 
 logging.info("RUN CMD: \"%s\"", quoted_run_cmd)
 if quoted_run_cmd:
-    singularity_contents = "#!" + shell_path + "\n" + "\n"
-    singularity_contents += "exec " + quoted_run_cmd + "\n"
-    print_to_file_if_not_exists(path.join(rootfs_dir, "singularity"), 0755, singularity_contents)
+    runscript_contents = "#!/bin/sh\n" + "\n"
+    runscript_contents += "exec " + quoted_run_cmd + "\n"
+    print_to_file(path.join(rootfs_dir, ".singularity.d", "runscript"), 0755, runscript_contents)
 
 
 #TODO: Support for -a option #!!!
@@ -294,6 +261,7 @@ if quoted_run_cmd:
 if (output_type == "directory"):
     shutil.move(rootfs_dir, output_filename)
 elif (output_type == "SquashFS"):
+    subprocess.call(['chmod', '-R', 'u+rwX,go+rX', rootfs_dir])
     output_noext, output_ext
     tmp_output_filename = mktemp(prefix=output_noext+"_tmp-", suffix=output_ext, dir=output_dirname)
     subprocess.call(["mksquashfs", rootfs_dir, tmp_output_filename, "-all-root"])
