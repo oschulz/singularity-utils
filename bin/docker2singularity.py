@@ -246,9 +246,6 @@ environment_contents += "\n".join(["export " + e['name'] + "=" + shell_double_qu
 print_to_file(path.join(rootfs_dir, ".singularity.d", "env", "10-docker.sh"), 0644, environment_contents)
 
 
-subprocess.call(["sed", "s/bash --norc/bash/", "-i", path.join(rootfs_dir, ".singularity.d", "actions", "shell")])
-
-
 logging.info("RUN CMD: \"%s\"", quoted_run_cmd)
 if quoted_run_cmd:
     runscript_contents = "#!/bin/sh\n" + "\n"
